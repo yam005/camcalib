@@ -152,7 +152,7 @@ int main()
 		cout<<"第"<<i+1<<"幅图像的平均误差："<<err<<"像素"<<endl;   
 		fout<<"第"<<i+1<<"幅图像的平均误差："<<err<<"像素"<<endl;   
 	}   
-	cout<<"所有图像总体平均误差："<<total_err/image_count<<"像素"<<endl;   
+	cout<<"所有图像总体平均误差："<<total_err/image_count<<"像素"<<endl<<endl;   
 	fout<<"所有图像总体平均误差："<<total_err/image_count<<"像素"<<endl<<endl;   
 	Mat rotation_matrix = Mat(3,3,CV_32FC1, Scalar::all(0)); /* 保存每幅图像的旋转矩阵 */
 	fout<<"相机内参数矩阵："<<endl;   
@@ -193,7 +193,7 @@ int main()
 		Mat newimage = imageSource.clone();
 		
 		//方法一：使用initUndistortRectifyMap和remap两个函数配合实现
-		initUndistortRectifyMap(cameraMatrix,distCoeffs,R,cameraMatrix,image_size,CV_32FC1,mapx,mapy);		
+	initUndistortRectifyMap(cameraMatrix,distCoeffs,R,cameraMatrix,image_size,CV_32FC1,mapx,mapy);		
 		remap(imageSource,newimage,mapx, mapy, INTER_LINEAR);		
 		//方法二：不需要转换矩阵的方式，使用undistort函数实现
 		//undistort(imageSource,newimage,cameraMatrix,distCoeffs);
@@ -201,6 +201,71 @@ int main()
 		filename += "_d.jpg";
 		imwrite(filename,newimage);
 	}*/
+
+
+	float p1 = (float)distCoeffs.at<double>(0,2);
+	float p2 = (float)distCoeffs.at<double>(0,3);
+	float fx = (float)cameraMatrix.at<double>(0,0);
+	float fy = (float)cameraMatrix.at<double>(1,1);
+	float u0 = (float)cameraMatrix.at<double>(0,2);
+	float v0 = (float)cameraMatrix.at<double>(1,2);
+	//内参矩阵求逆。从畸变图到矫正图用内参矩阵，反之则用逆矩阵
+	Mat_<double> iR = cameraMatrix.inv(DECOMP_LU);
+	float fx1 = (float)iR.at<double>(0,0);
+	float fy1 = (float)iR.at<double>(1,1);
+	float u01 = (float)iR.at<double>(0,2);
+	float v01 = (float)iR.at<double>(1,2);
+	float efl = (fx+fy)/2.0; //EFL, unit:pixls
+        float pi = 3.1415926;	
+	float ru, xu, yu, theta; //undistorted pixl.
+	float r2;
+	float xd, yd; //distorted pixl
+	float a1,a2,a3; //angle
+	float r_sqr_max,r_sqr_min;  //rd^2 = xd*xd+yd*yd
+	float temp = 0;
+	cout<<"主点偏移：u0 = "<<u0<<"像素， v0 = "<<v0<<"像素"<<endl;
+	ru = 100; //实际上ru取值的变化对lens tilt的计算结果影响不大
+	cout<<"ru: "<<ru<<"像素\t"<<"f: "<<efl<<"像素"<<endl;
+	a1 = atan(efl/ru); 
+	cout<<"以ru为半径，f为高的成像圆锥，底角 a1 = "<<a1*180/pi<<"度"<<endl;
+	r_sqr_max=0;
+	r_sqr_min=999999;
+	/*镜头光心倾斜后，成像圆锥在成像面上的投影环不再是圆形。遍历投影环
+	边缘所有点, 离光轴点(u0,v0)最远的点到光轴点的连线，即为光轴倾斜的
+	方向*/
+	for (theta=0; theta<2*pi; theta+=0.001)
+	{
+	        xu = ru*cos(theta)+u0; 
+		xu = xu*fx1+u01;
+		yu = ru*sin(theta)+v0; 
+		yu = yu*fy1+v01;
+		r2 = xu*xu+yu*yu;
+		//光轴倾斜会引入切向畸变，不会引入径向畸变
+		xd = xu+2*p1*xu*yu+p2*(r2+2*xu*xu);
+		yd = yu+2*p2*xu*yu+p1*(r2+2*yu*yu);
+		xd = xd*fx+u0;
+		yd = yd*fy+v0;
+		//计算（xd,yd）离光轴点(u0,v0)的距离
+		xd -= u0;
+		yd -= v0;
+		temp = xd*xd+yd*yd; //距离的平方
+		if (r_sqr_max<temp)
+		{
+			r_sqr_max = temp; //缓存当前最大值
+		}
+	       	if (r_sqr_min>temp)
+		{
+			r_sqr_min = temp; //缓存当前最小值
+		}
+	}
+	float rmax = sqrt(r_sqr_max);
+	float rmin = sqrt(r_sqr_min);
+	cout<<"rmax: "<<rmax<<"\t"<<"rmin: "<<rmin<<endl;
+	a2 = asin(ru*sin(a1)/rmax);
+	a3 = a1-a2;
+	a3 = 180*a3/pi; //change from radian to degree
+	cout<<"光轴倾斜: "<<fixed<<setprecision(2)<<a3<<"度"<<endl;
+
 	cout<<"结束"<<endl;	
 	return 0;
 }
